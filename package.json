@@ -1,0 +1,22 @@
+{
+  "name"         : "dunnstreet",
+  "version"      : "0.0.1",
+  "description"  : "",
+  "main"         : "dunnstreet.js",
+  "scripts"      : {
+    "test" : "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository"   : {
+    "type" : "git",
+    "url"  : "https://github.com/johnlayton/dunnstreet.git"
+  },
+  "author"       : "",
+  "license"      : "ISC",
+  "bugs"         : {
+    "url" : "https://github.com/johnlayton/dunnstreet/issues"
+  },
+  "homepage"     : "https://github.com/johnlayton/dunnstreet",
+  "dependencies" : {
+    "allimaavenue" : "git://github.com/johnlayton/allimaavenue"
+  }
+}
