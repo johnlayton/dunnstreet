@@ -10,15 +10,250 @@
   }
 }( this, function () {
 
+  var util = require( 'util' );
+  var pack = require( 'ndarray-pack' );
+  var unpack = require( 'ndarray-unpack' );
+
   var Dunnstreet = (function () {
+
+    function select( arr, ranges ) {
+      var lo = ranges.map( function( item ) { return item[0]; } );
+      var st = ranges.map( function( item ) { return item[1]; } );
+      var hi = ranges.map( function( item ) { return item[2]; } );
+      var body = "return arr" +
+                 ".lo( " + lo.join( ',' ) + " )" +
+                 ".hi( " + hi.join( ',' ) + " )" +
+                 ".step( " + st.join( ',' ) + " )" +
+                 ";";
+      var func = new Function("arr", body);
+      return func( arr );
+    }
+
+    function buffer( arr ) {
+      var data = pack( unpack( arr ) );
+      var str = "";
+      str = str + new Buffer( [ data.length ] );
+      str = str +  new Buffer( data.data );
+      return str;
+    }
+
+    function find( arr, callback ) {
+      for ( var i = 0, len = arr.length; i < len; i++ ) {
+        if ( callback( arr[i] ) ) {
+          return arr[i];
+        }
+      }
+      return null;
+    }
+
+    const NC_BYTE = 0x01;
+    const NC_CHAR = 0x02;
+    const NC_SHORT = 0x03;
+    const NC_INT = 0x04;
+    const NC_FLOAT = 0x05;
+    const NC_DOUBLE = 0x06;
+    const NC_STRING = 0xFF;
+
+    function describeType( i ) {
+      switch ( i ) {
+        case NC_INT:
+          return "Int32";
+        case NC_FLOAT:
+          return "Float32";
+        case NC_STRING:
+        case NC_CHAR:
+          return "String";
+        default:
+          return "";
+      }
+    }
+
+    function describeValue( i, v ) {
+      switch ( i ) {
+        case NC_BYTE:
+        case NC_SHORT:
+        case NC_INT:
+        case NC_DOUBLE:
+          return v;
+        case NC_FLOAT:
+          return v[0];
+        case NC_CHAR:
+        case NC_STRING:
+          return "\"" + v + "\"";
+        default:
+          return "";
+      }
+    }
+
+    function describeAttribute( attribute ) {
+      var type = describeType( attribute.type );
+      var name = attribute.name;
+      var value = describeValue( attribute.type, attribute.value );
+      return type + " " + name + " " + value + ";"
+    }
+
+    function describePrimitiveVariable( variable, model ) {
+      var type = describeType( variable.type );
+      var name = variable.name;
+      var dims = variable.dimensions.map( function ( dim ) {
+        return "[" + dim.name + " = " + dim.size + "]"
+      } ).join( "" );
+      return type + " " + name + dims + ";"
+    }
+
+    function describeGriddedVariable( variable, model ) {
+      var grid = "Grid {";
+      grid = grid + "ARRAY:";
+      grid = grid + describePrimitiveVariable( variable );
+      grid = grid + "MAPS:";
+      var dimensions = variable.dimensions;
+      for ( var i = 0, len = dimensions.length; i < len; i++ ) {
+        var name = dimensions[i].name;
+        grid = grid + describePrimitiveVariable( find( model.head.variables, function ( a ) {
+          return a.name == name;
+        } ) );
+      }
+      grid = grid + "} " + variable.name + ";";
+      return grid;
+    }
+
+    function describeVariable( variable, model ) {
+      if ( variable.dimensions.length > 1 ) {
+        return describeGriddedVariable( variable, model );
+      }
+      else {
+        return describePrimitiveVariable( variable, model );
+      }
+    }
 
     var Dunnstreet = function ( options ) {
       this.options = options;
     };
 
-    Dunnstreet.prototype.clear = function () {
+    Dunnstreet.prototype.full_dds = function () {
+      var dds = "";
+      var variables = this.options.model.head.variables;
+      for ( var j = 0, l2 = variables.length; j < l2; j++ ) {
+        dds = dds + describeVariable( variables[j], this.options.model );
+      }
+      return dds;
     };
 
+    Dunnstreet.prototype.part_dds = function ( variables ) {
+      var dds = "";
+      for ( var i = 0, len = variables.length; i < len; i++ ) {
+        var name = variables[i].name;
+        var range = variables[i].range;
+        var variable = find( this.options.model.head.variables, function ( a ) {
+          return a.name == name;
+        } );
+        var dimensions = [];
+        for ( var j = 0, l2 = variable.dimensions.length; j < l2; j++ ) {
+          if ( range[j] && range[j].length == 3 ) {
+            var dim = {
+              name: variable.dimensions[j].name,
+              size: Math.floor( ( range[j][2] - range[j][0] ) / range[j][1] )
+            };
+            dimensions.push( dim );
+          } else {
+            dimensions.push( variable.dimensions[j] );
+          }
+        }
+        var clone = {
+          type: variable.type,
+          name: variable.name,
+          dimensions: dimensions
+        };
+        dds = dds + describeVariable( clone, this.options.model );
+      }
+      return dds;
+    };
+
+    Dunnstreet.prototype.dds = function ( variables ) {
+      var dds = "Dataset {";
+      if ( variables ) {
+        dds = dds + this.part_dds( variables );
+      } else {
+        dds = dds + this.full_dds();
+      }
+      dds = dds + "} " + ( this.options.filename || '' ) + ";";
+      return dds;
+    };
+
+    Dunnstreet.prototype.das = function () {
+      var das = "Attributes {";
+      var variables = this.options.model.head.variables;
+      for ( var i = 0, l1 = variables.length; i < l1; i++ ) {
+        var variable = variables[i];
+        das = das + " " + variable.name + " {";
+        for ( var j = 0, l2 = variable.attributes.length; j < l2; j++ ) {
+          das = das + describeAttribute( variable.attributes[j] );
+        }
+        das = das + "}";
+      }
+      if ( this.options.model.head.attributes && this.options.model.head.attributes.length > 0 ) {
+        das = das + "NC_GLOBAL {";
+        for ( var k = 0, l3 = this.options.model.head.attributes.length; k < l3; k++ ) {
+          das = das + describeAttribute( this.options.model.head.attributes[k] );
+        }
+        das = das + "}";
+      }
+      das = das + "}";
+      return das;
+    };
+
+    Dunnstreet.prototype.full_dods = function () {
+      var dap = this.dds();
+      dap = dap + "\n\nData;\n";
+      var data = find( this.options.model.data.variables, function ( v ) {
+        return v.variable.name == "time";
+      } ).data.data;
+      data = select( data, [1,1,10] );
+      dap = dap + new Buffer( data );
+      return dap;
+    };
+
+    Dunnstreet.prototype.part_dods = function ( variables ) {
+      var dap = this.dds( variables );
+      dap = dap + "\n\nData;\n";
+      for ( var i = 0, len = variables.length; i < len; i++ ) {
+        var variable = variables[i];
+        var data = find( this.options.model.data.variables, function ( v ) {
+          return v.variable.name == variable.name;
+        } ).data;
+        var ranges = variables.map( function ( v ) {
+          return v.range;
+        } );
+        data = (ranges && ranges.length > 0) ? select( data, ranges ) : data;
+        dap = dap + buffer( data );
+      }
+      return dap;
+    };
+
+    Dunnstreet.prototype.dods = function ( variables ) {
+      if ( variables ) {
+        return this.part_dods( variables );
+      } else {
+        return this.full_dods();
+      }
+    };
+
+/*
+    Dunnstreet.prototype.ascii = function ( variables ) {
+      var dap = this.dds( variables );
+      dap = dap + "\n---------------------------------------------\n";
+      for ( var i = 0, len = variables.length; i < len; i++ ) {
+        var variable = variables[i];
+        var data = find( this.options.model.data.variables, function ( v ) {
+          return v.variable.name == variable.name;
+        } ).data;
+        data = select( data, variables.map( function(v) { return v.range; } ) );
+        //dap = dap + data.size;
+        dap = dap + buffer( data );
+      }
+      return dap;
+    };
+*/
 
     return Dunnstreet;
   })();
