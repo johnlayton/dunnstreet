@@ -11,15 +11,14 @@
 }( this, function () {
 
   var util = require( 'util' );
-  var pack = require( 'ndarray-pack' );
-  var unpack = require( 'ndarray-unpack' );
+  var cwise = require("cwise")
 
   var Dunnstreet = (function () {
 
     function select( arr, ranges ) {
       var lo = ranges.map( function( item ) { return item[0]; } );
       var st = ranges.map( function( item ) { return item[1]; } );
-      var hi = ranges.map( function( item ) { return item[2]; } );
+      var hi = ranges.map( function( item ) { return Math.max( ( item[2] - item[0] ), 1 ); } );
       var body = "return arr" +
                  ".lo( " + lo.join( ',' ) + " )" +
                  ".hi( " + hi.join( ',' ) + " )" +
@@ -30,11 +29,48 @@
     }
 
     function buffer( arr ) {
-      var data = pack( unpack( arr ) );
-      var str = "";
-      str = str + new Buffer( [ data.length ] );
-      str = str +  new Buffer( data.data );
-      return str;
+      function toBuffer(d) {
+        if ( d.size > 0 ) {
+          if ( d.dtype == "int32" ) {
+            var buffer = new Buffer( 8 + ( d.size * 4 ) );
+            buffer.writeInt32BE( d.size, 0 );
+            buffer.writeInt32BE( d.size, 4 );
+            var to_buffer = cwise({
+                                    args: ["array", "scalar"],
+                                    body: function to_buffer(val, buffer) {
+                                      this.position = this.position || 8;
+                                      buffer.writeInt32BE( val, this.position );
+                                      this.position = this.position + 4;
+                                    }
+                                  });
+            to_buffer(d, buffer);
+            return buffer;
+          } else if ( d.dtype == "float32" ) {
+            var buffer = new Buffer( 8 + ( d.size * 4 ) );
+            buffer.writeInt32BE( d.size, 0 );
+            buffer.writeInt32BE( d.size, 4 );
+            var to_buffer = cwise( {
+                                     args : ["array", "scalar"],
+                                     body : function to_buffer( val, buffer ) {
+                                       this.position = this.position || 8;
+                                       buffer.writeFloatBE( val, this.position );
+                                       this.position = this.position + 4;
+                                     }
+                                   } );
+            to_buffer( d, buffer );
+            return buffer;
+          }
+          else {
+            console.log( "###########" );
+            console.log( "MISSED : " + arr.dtype );
+            console.log( "###########" );
+          }
+          return buffer;
+        } else {
+          return new Buffer(0);
+        }
+      }
+      return toBuffer( arr );
     }
 
     function find( arr, callback ) {
@@ -92,26 +128,35 @@
       return type + " " + name + " " + value + ";"
     }
 
-    function describePrimitiveVariable( variable, model ) {
+    function describeMultiDimensionalVariable( variable, size ) {
       var type = describeType( variable.type );
       var name = variable.name;
       var dims = variable.dimensions.map( function ( dim ) {
-        return "[" + dim.name + " = " + dim.size + "]"
+        return "[" + dim.name + " = " + ( size ? size[dim.name] || dim.size : dim.size ) + "]"
       } ).join( "" );
+      return type + " " + name + dims + ";"
+    }
+
+    function describeSingleDimensionalVariable( variable, size ) {
+      var type = describeType( variable.type );
+      var name = variable.name;
+      var dim  = variable.dimensions[0];
+      var dims = "[" + dim.name + " = " + ( size || dim.size ) + "]"
       return type + " " + name + dims + ";"
     }
 
     function describeGriddedVariable( variable, model ) {
       var grid = "Grid {";
       grid = grid + "ARRAY:";
-      grid = grid + describePrimitiveVariable( variable );
+      grid = grid + describeMultiDimensionalVariable( variable );
       grid = grid + "MAPS:";
       var dimensions = variable.dimensions;
       for ( var i = 0, len = dimensions.length; i < len; i++ ) {
         var name = dimensions[i].name;
-        grid = grid + describePrimitiveVariable( find( model.head.variables, function ( a ) {
+        var size = dimensions[i].size;
+        grid = grid + describeSingleDimensionalVariable( find( model.head.variables, function ( a ) {
           return a.name == name;
-        } ) );
+        } ), size );
       }
       grid = grid + "} " + variable.name + ";";
       return grid;
@@ -122,7 +167,50 @@
         return describeGriddedVariable( variable, model );
       }
       else {
-        return describePrimitiveVariable( variable, model );
+        return describeSingleDimensionalVariable( variable );
+      }
+    }
+
+    function dataForMultiDimensionalVariable( variable, model ) {
+      var data = find( model.data.variables, function ( v ) {
+        return v.variable.name == variable.name;
+      } ).data;
+      data = (variable.range && variable.range.length > 0) ? select( data, variable.range ) : data;
+      return buffer( data );
+    }
+
+    function dataForSingleDimensionalVariable( variable, model ) {
+      var data = find( model.data.variables, function ( v ) {
+        return v.variable.name == variable.name;
+      } ).data;
+      data = (variable.range && variable.range.length > 0) ? select( data, variable.range ) : data;
+      return buffer( data );
+    }
+
+    function dataForGriddedVariable( variable, model ) {
+      data = dataForMultiDimensionalVariable( variable, model );
+      var dimensions = find( model.head.variables, function ( v ) {
+        return v.name == variable.name;
+      } ).dimensions;
+      for ( var i = 0, len = dimensions.length; i < len; i++ ) {
+        var tmpvar = {
+          name  : dimensions[i].name,
+          range : [variable.range[i]]
+        };
+        data = Buffer.concat( [ data, dataForSingleDimensionalVariable( tmpvar, model ) ] );
+      }
+      return data;
+    }
+
+    function dataForVariable( variable, model ) {
+      var dimensions = find( model.head.variables, function ( v ) {
+        return v.name == variable.name;
+      } ).dimensions;
+      if ( dimensions.length > 1 ) {
+        return dataForGriddedVariable( variable, model );
+      }
+      else {
+        return dataForSingleDimensionalVariable( variable, model );
       }
     }
 
@@ -136,23 +224,25 @@
       for ( var j = 0, l2 = variables.length; j < l2; j++ ) {
         dds = dds + describeVariable( variables[j], this.options.model );
       }
-      return dds;
+      return new Buffer( dds );
     };
 
     Dunnstreet.prototype.part_dds = function ( variables ) {
       var dds = "";
       for ( var i = 0, len = variables.length; i < len; i++ ) {
+
         var name = variables[i].name;
-        var range = variables[i].range;
         var variable = find( this.options.model.head.variables, function ( a ) {
           return a.name == name;
         } );
+
+        var range = variables[i].range;
         var dimensions = [];
         for ( var j = 0, l2 = variable.dimensions.length; j < l2; j++ ) {
           if ( range[j] && range[j].length == 3 ) {
             var dim = {
               name: variable.dimensions[j].name,
-              size: Math.floor( ( range[j][2] - range[j][0] ) / range[j][1] )
+              size: Math.max( Math.floor( ( range[j][2] - range[j][0] ) / range[j][1] ), 1 )
             };
             dimensions.push( dim );
           } else {
@@ -164,20 +254,21 @@
           name: variable.name,
           dimensions: dimensions
         };
+
         dds = dds + describeVariable( clone, this.options.model );
       }
-      return dds;
+      return new Buffer( dds );
     };
 
     Dunnstreet.prototype.dds = function ( variables ) {
       var dds = "Dataset {";
-      if ( variables ) {
+      if ( variables && variables.length > 0 ) {
         dds = dds + this.part_dds( variables );
       } else {
         dds = dds + this.full_dds();
       }
       dds = dds + "} " + ( this.options.filename || '' ) + ";";
-      return dds;
+      return new Buffer( dds );
     };
 
     Dunnstreet.prototype.das = function () {
@@ -199,37 +290,41 @@
         das = das + "}";
       }
       das = das + "}";
-      return das;
+      return new Buffer( das );
     };
 
+/*
     Dunnstreet.prototype.full_dods = function () {
       var dap = this.dds();
-      dap = dap + "\n\nData;\n";
+      dap = Buffer.concat( [ dap, new Buffer( "\nData:\n" ) ] );
       var data = find( this.options.model.data.variables, function ( v ) {
         return v.variable.name == "time";
       } ).data.data;
       data = select( data, [1,1,10] );
-      dap = dap + new Buffer( data );
-      return dap;
+      return Buffer.concat( [ dap, buffer( data ) ] );
     };
+*/
 
-    Dunnstreet.prototype.part_dods = function ( variables ) {
+    //Dunnstreet.prototype.part_dods = function ( variables ) {
+    Dunnstreet.prototype.dods = function ( variables ) {
       var dap = this.dds( variables );
-      dap = dap + "\n\nData;\n";
+      dap = Buffer.concat( [ dap, new Buffer( "\nData:\n" ) ] );
       for ( var i = 0, len = variables.length; i < len; i++ ) {
-        var variable = variables[i];
-        var data = find( this.options.model.data.variables, function ( v ) {
-          return v.variable.name == variable.name;
-        } ).data;
-        var ranges = variables.map( function ( v ) {
-          return v.range;
-        } );
-        data = (ranges && ranges.length > 0) ? select( data, ranges ) : data;
-        dap = dap + buffer( data );
+        dap = Buffer.concat( [ dap, dataForVariable( variables[i], this.options.model )  ] );
       }
-      return dap;
+      return dap
     };
 
+    Dunnstreet.prototype.ascii = function ( variables ) {
+      var dap = this.dds( variables );
+      dap = Buffer.concat( [ dap, new Buffer( "\---------------------------------------------\n" ) ] );
+      //for ( var i = 0, len = variables.length; i < len; i++ ) {
+      //  dap = Buffer.concat( [ dap, dataForVariable( variables[i], this.options.model )  ] );
+      //}
+      return dap
+    };
+
+/*
     Dunnstreet.prototype.dods = function ( variables ) {
       if ( variables ) {
         return this.part_dods( variables );
@@ -237,6 +332,7 @@
         return this.full_dods();
       }
     };
+*/
 
 /*
     Dunnstreet.prototype.ascii = function ( variables ) {

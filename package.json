@@ -1,22 +1,28 @@
 {
-  "name"         : "dunnstreet",
-  "version"      : "0.0.1",
-  "description"  : "",
-  "main"         : "dunnstreet.js",
-  "scripts"      : {
-    "test" : "echo \"Error: no test specified\" && exit 1"
+  "name"            : "dunnstreet",
+  "version"         : "0.0.1",
+  "description"     : "",
+  "main"            : "dunnstreet.js",
+  "scripts"         : {
+    "test" : "tap test/*.js"
   },
-  "repository"   : {
+  "repository"      : {
     "type" : "git",
     "url"  : "https://github.com/johnlayton/dunnstreet.git"
   },
-  "author"       : "",
-  "license"      : "ISC",
-  "bugs"         : {
+  "author"          : "",
+  "license"         : "ISC",
+  "bugs"            : {
     "url" : "https://github.com/johnlayton/dunnstreet/issues"
   },
-  "homepage"     : "https://github.com/johnlayton/dunnstreet",
-  "dependencies" : {
-    "allimaavenue" : "git://github.com/johnlayton/allimaavenue"
+  "homepage"        : "https://github.com/johnlayton/dunnstreet",
+  "dependencies"    : {
+    "allimaavenue" : "git://github.com/johnlayton/allimaavenue",
+    "cwise"        : "^1.0.4"
+  },
+  "devDependencies" : {
+    "kettstreet" : "git://github.com/johnlayton/kettstreet",
+    "tape"       : "~2.14.0",
+    "tap"        : "~0.4.12"
   }
 }
