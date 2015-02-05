@@ -16,16 +16,17 @@
   var Dunnstreet = (function () {
 
     function select( arr, ranges ) {
-      var lo = ranges.map( function( item ) { return item[0]; } );
+      var lo = ranges.map( function( item ) { return Math.max( ( item[0] - 1 ), 0 ) ; } );
+      var hi = ranges.map( function( item ) { return Math.max( ( item[2] - ( item[0] - 1 ) ), 1 ); } );
       var st = ranges.map( function( item ) { return item[1]; } );
-      var hi = ranges.map( function( item ) { return Math.max( ( item[2] - item[0] ), 1 ); } );
       var body = "return arr" +
                  ".lo( " + lo.join( ',' ) + " )" +
                  ".hi( " + hi.join( ',' ) + " )" +
                  ".step( " + st.join( ',' ) + " )" +
                  ";";
       var func = new Function("arr", body);
-      return func( arr );
+      var data = func( arr );
+      return data;
     }
 
     function buffer( arr ) {
@@ -33,31 +34,38 @@
         if ( d.size > 0 ) {
           if ( d.dtype == "int32" ) {
             var buffer = new Buffer( 8 + ( d.size * 4 ) );
-            buffer.writeInt32BE( d.size, 0 );
-            buffer.writeInt32BE( d.size, 4 );
+            buffer.writeUInt32BE( d.size, 0 );
+            buffer.writeUInt32BE( d.size, 4 );
             var to_buffer = cwise({
-                                    args: ["array", "scalar"],
-                                    body: function to_buffer(val, buffer) {
-                                      this.position = this.position || 8;
-                                      buffer.writeInt32BE( val, this.position );
-                                      this.position = this.position + 4;
-                                    }
-                                  });
+              args: ["array", "scalar"],
+              body: function to_buffer(val, buffer) {
+                this.position = this.position || 8;
+                buffer.writeInt32BE( val, this.position );
+                this.position = this.position + 4;
+              }
+            });
             to_buffer(d, buffer);
             return buffer;
           } else if ( d.dtype == "float32" ) {
             var buffer = new Buffer( 8 + ( d.size * 4 ) );
-            buffer.writeInt32BE( d.size, 0 );
-            buffer.writeInt32BE( d.size, 4 );
+            buffer.writeUInt32BE( d.size, 0 );
+            buffer.writeUInt32BE( d.size, 4 );
             var to_buffer = cwise( {
-                                     args : ["array", "scalar"],
-                                     body : function to_buffer( val, buffer ) {
-                                       this.position = this.position || 8;
-                                       buffer.writeFloatBE( val, this.position );
-                                       this.position = this.position + 4;
-                                     }
-                                   } );
-            to_buffer( d, buffer );
+               args : ["array", "scalar", "index"],
+               pre: function() {
+                 this.count = 0;
+               },
+               post: function() {
+                 return this.count
+               },
+               body : function to_buffer( val, buffer, idx ) {
+                 this.position = this.position || 8;
+                 this.count += 1;
+                 buffer.writeFloatBE( val, this.position );
+                 this.position = this.position + 4;
+               }
+             } );
+            var i = to_buffer( d, buffer );
             return buffer;
           }
           else {
@@ -242,7 +250,7 @@
           if ( range[j] && range[j].length == 3 ) {
             var dim = {
               name: variable.dimensions[j].name,
-              size: Math.max( Math.floor( ( range[j][2] - range[j][0] ) / range[j][1] ), 1 )
+              size: Math.max( Math.ceil( ( range[j][2] - ( range[j][0] - 1 ) ) / range[j][1] ), 1 )
             };
             dimensions.push( dim );
           } else {
@@ -317,7 +325,7 @@
 
     Dunnstreet.prototype.ascii = function ( variables ) {
       var dap = this.dds( variables );
-      dap = Buffer.concat( [ dap, new Buffer( "\---------------------------------------------\n" ) ] );
+      dap = Buffer.concat( [ dap, new Buffer( "\n---------------------------------------------\n" ) ] );
       //for ( var i = 0, len = variables.length; i < len; i++ ) {
       //  dap = Buffer.concat( [ dap, dataForVariable( variables[i], this.options.model )  ] );
       //}
