@@ -15,6 +15,18 @@
 
   var Dunnstreet = (function () {
 
+    const NC_BYTE = 0x01;
+    const NC_CHAR = 0x02;
+    const NC_SHORT = 0x03;
+    const NC_INT = 0x04;
+    const NC_FLOAT = 0x05;
+    const NC_DOUBLE = 0x06;
+    const NC_STRING = 0xFF;
+
+    function concat() {
+      return Array.prototype.slice.call(arguments ).join( '\n' );
+    }
+
     function select( arr, ranges ) {
       var lo = ranges.map( function( item ) { return Math.max( ( item[0] - 1 ), 0 ) ; } );
       var hi = ranges.map( function( item ) { return Math.max( ( item[2] - ( item[0] - 1 ) ), 1 ); } );
@@ -25,8 +37,7 @@
                  ".step( " + st.join( ',' ) + " )" +
                  ";";
       var func = new Function("arr", body);
-      var data = func( arr );
-      return data;
+      return func( arr );
     }
 
     function buffer( arr ) {
@@ -51,14 +62,14 @@
             buffer.writeUInt32BE( d.size, 0 );
             buffer.writeUInt32BE( d.size, 4 );
             var to_buffer = cwise( {
-               args : ["array", "scalar", "index"],
+               args : ["array", "scalar"],
                pre: function() {
                  this.count = 0;
                },
                post: function() {
                  return this.count
                },
-               body : function to_buffer( val, buffer, idx ) {
+               body : function to_buffer( val, buffer ) {
                  this.position = this.position || 8;
                  this.count += 1;
                  buffer.writeFloatBE( val, this.position );
@@ -89,14 +100,6 @@
       }
       return null;
     }
-
-    const NC_BYTE = 0x01;
-    const NC_CHAR = 0x02;
-    const NC_SHORT = 0x03;
-    const NC_INT = 0x04;
-    const NC_FLOAT = 0x05;
-    const NC_DOUBLE = 0x06;
-    const NC_STRING = 0xFF;
 
     function describeType( i ) {
       switch ( i ) {
@@ -155,18 +158,18 @@
 
     function describeGriddedVariable( variable, model ) {
       var grid = "Grid {";
-      grid = grid + "ARRAY:";
-      grid = grid + describeMultiDimensionalVariable( variable );
-      grid = grid + "MAPS:";
+      grid = concat( grid, "ARRAY:" );
+      grid = concat( grid, describeMultiDimensionalVariable( variable ) );
+      grid = concat( grid, "MAPS:" );
       var dimensions = variable.dimensions;
       for ( var i = 0, len = dimensions.length; i < len; i++ ) {
         var name = dimensions[i].name;
         var size = dimensions[i].size;
-        grid = grid + describeSingleDimensionalVariable( find( model.head.variables, function ( a ) {
+        grid = concat( grid, describeSingleDimensionalVariable( find( model.head.variables, function ( a ) {
           return a.name == name;
-        } ), size );
+        } ), size ) );
       }
-      grid = grid + "} " + variable.name + ";";
+      grid = concat( grid, "} " + variable.name + ";" );
       return grid;
     }
 
@@ -230,7 +233,7 @@
       var dds = "";
       var variables = this.options.model.head.variables;
       for ( var j = 0, l2 = variables.length; j < l2; j++ ) {
-        dds = dds + describeVariable( variables[j], this.options.model );
+        dds = concat( dds, describeVariable( variables[j], this.options.model ) );
       }
       return new Buffer( dds );
     };
@@ -263,7 +266,7 @@
           dimensions: dimensions
         };
 
-        dds = dds + describeVariable( clone, this.options.model );
+        dds = concat( dds, describeVariable( clone, this.options.model ) );
       }
       return new Buffer( dds );
     };
@@ -271,11 +274,11 @@
     Dunnstreet.prototype.dds = function ( variables ) {
       var dds = "Dataset {";
       if ( variables && variables.length > 0 ) {
-        dds = dds + this.part_dds( variables );
+        dds = concat( dds, this.part_dds( variables ) );
       } else {
-        dds = dds + this.full_dds();
+        dds = concat( dds, this.full_dds() );
       }
-      dds = dds + "} " + ( this.options.filename || '' ) + ";";
+      dds = concat( dds, "} " + ( this.options.filename || '' ) + ";" );
       return new Buffer( dds );
     };
 
@@ -284,20 +287,20 @@
       var variables = this.options.model.head.variables;
       for ( var i = 0, l1 = variables.length; i < l1; i++ ) {
         var variable = variables[i];
-        das = das + " " + variable.name + " {";
+        das = concat( das, " " + variable.name + " {" );
         for ( var j = 0, l2 = variable.attributes.length; j < l2; j++ ) {
-          das = das + describeAttribute( variable.attributes[j] );
+          das = concat( das, describeAttribute( variable.attributes[j] ) );
         }
-        das = das + "}";
+        das = concat( das, "}" );
       }
       if ( this.options.model.head.attributes && this.options.model.head.attributes.length > 0 ) {
-        das = das + "NC_GLOBAL {";
+        das = concat( das, "NC_GLOBAL {" );
         for ( var k = 0, l3 = this.options.model.head.attributes.length; k < l3; k++ ) {
-          das = das + describeAttribute( this.options.model.head.attributes[k] );
+          das = concat( das, describeAttribute( this.options.model.head.attributes[k] ) );
         }
-        das = das + "}";
+        das = concat( das, "}" );
       }
-      das = das + "}";
+      das = concat( das, "}" );
       return new Buffer( das );
     };
 
@@ -326,9 +329,11 @@
     Dunnstreet.prototype.ascii = function ( variables ) {
       var dap = this.dds( variables );
       dap = Buffer.concat( [ dap, new Buffer( "\n---------------------------------------------\n" ) ] );
-      //for ( var i = 0, len = variables.length; i < len; i++ ) {
+      for ( var i = 0, len = variables.length; i < len; i++ ) {
       //  dap = Buffer.concat( [ dap, dataForVariable( variables[i], this.options.model )  ] );
-      //}
+        console.log( dataForVariable( variables[i], this.options.model ) );
+      }
+
       return dap
     };
 
