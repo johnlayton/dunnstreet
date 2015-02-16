@@ -43,7 +43,8 @@ function kett( model ) {
     }
     return ab;
   }
-  var opendap = new OpenDAP( { model : model, filename : '/data/test.nc'} );
+  var opendap = new OpenDAP( { model : model,
+                               filename : '/data/test.nc'} );
   var provider = function ( url, callback ) {
     console.log( url );
     if ( url.match(/\.dds/) ) {

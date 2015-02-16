@@ -11,7 +11,7 @@
 }( this, function () {
 
   var util = require( 'util' );
-  var cwise = require("cwise")
+  var cwise = require("cwise");
 
   var Dunnstreet = (function () {
 
@@ -40,6 +40,39 @@
       return func( arr );
     }
 
+    function dataFor( variable, model ) {
+      var data = find( model.data.variables, function ( v ) {
+        return v.variable.name == variable.name;
+      } ).data;
+      data = (variable.range && variable.range.length > 0) ? select( data, variable.range ) : data;
+      return data;
+    }
+
+    function ascii( arr ) {
+      var to_buffer = cwise({
+        printCode : false,
+        args: ["array", "index"],
+        pre: function() {
+          this.buffer = "";
+        },
+        post: function() {
+          return this.buffer
+        },
+        body: function to_buffer(val, idx) {
+          if ( idx[ idx.length - 1 ] == 0  ) {
+            this.buffer = this.buffer + '\\n';
+            if ( idx.length > 1 ) {
+              this.buffer = this.buffer + "[" + idx.slice( 0, idx.length - 1 ).join( "][" ) + "], ";
+            }
+            this.buffer = this.buffer + val.toString();
+          } else {
+            this.buffer = this.buffer + ", " + val.toString();
+          }
+        }
+      });
+      return to_buffer( arr );
+    }
+
     function buffer( arr ) {
       function toBuffer(d) {
         if ( d.size > 0 ) {
@@ -48,6 +81,7 @@
             buffer.writeUInt32BE( d.size, 0 );
             buffer.writeUInt32BE( d.size, 4 );
             var to_buffer = cwise({
+              printCode : false,
               args: ["array", "scalar"],
               body: function to_buffer(val, buffer) {
                 this.position = this.position || 8;
@@ -62,6 +96,7 @@
             buffer.writeUInt32BE( d.size, 0 );
             buffer.writeUInt32BE( d.size, 4 );
             var to_buffer = cwise( {
+               printCode : false,
                args : ["array", "scalar"],
                pre: function() {
                  this.count = 0;
@@ -80,9 +115,9 @@
             return buffer;
           }
           else {
-            console.log( "###########" );
-            console.log( "MISSED : " + arr.dtype );
-            console.log( "###########" );
+            //console.log( "###########" );
+            //console.log( "MISSED : " + arr.dtype );
+            //console.log( "###########" );
           }
           return buffer;
         } else {
@@ -182,24 +217,12 @@
       }
     }
 
-    function dataForMultiDimensionalVariable( variable, model ) {
-      var data = find( model.data.variables, function ( v ) {
-        return v.variable.name == variable.name;
-      } ).data;
-      data = (variable.range && variable.range.length > 0) ? select( data, variable.range ) : data;
-      return buffer( data );
+    function dodsForSingleVariable( variable, model ) {
+      return buffer( dataFor( variable, model ) );
     }
 
-    function dataForSingleDimensionalVariable( variable, model ) {
-      var data = find( model.data.variables, function ( v ) {
-        return v.variable.name == variable.name;
-      } ).data;
-      data = (variable.range && variable.range.length > 0) ? select( data, variable.range ) : data;
-      return buffer( data );
-    }
-
-    function dataForGriddedVariable( variable, model ) {
-      data = dataForMultiDimensionalVariable( variable, model );
+    function dodsForGriddedVariable( variable, model ) {
+      data = dodsForSingleVariable( variable, model );
       var dimensions = find( model.head.variables, function ( v ) {
         return v.name == variable.name;
       } ).dimensions;
@@ -208,20 +231,53 @@
           name  : dimensions[i].name,
           range : [variable.range[i]]
         };
-        data = Buffer.concat( [ data, dataForSingleDimensionalVariable( tmpvar, model ) ] );
+        data = Buffer.concat( [ data, dodsForSingleVariable( tmpvar, model ) ] );
       }
       return data;
     }
 
-    function dataForVariable( variable, model ) {
+    function dodsForVariable( variable, model ) {
       var dimensions = find( model.head.variables, function ( v ) {
         return v.name == variable.name;
       } ).dimensions;
       if ( dimensions.length > 1 ) {
-        return dataForGriddedVariable( variable, model );
+        return dodsForGriddedVariable( variable, model );
       }
       else {
-        return dataForSingleDimensionalVariable( variable, model );
+        return dodsForSingleVariable( variable, model );
+      }
+    }
+
+    function asciiForSingleVariable( variable, model ) {
+      var data = dataFor( variable, model )
+      var text = new Buffer( variable.name + "[" + data.shape.slice( 0, data.shape.length ).join( "][" ) + "]" );
+      return Buffer.concat( [ text, new Buffer( ascii( data ) + "\n\n" ) ] );
+    }
+
+    function asciiForGriddedVariable( variable, model ) {
+      var data = Buffer.concat( [ new Buffer(variable.name + "."), asciiForSingleVariable( variable, model ) ] );
+      var dimensions = find( model.head.variables, function ( v ) {
+        return v.name == variable.name;
+      } ).dimensions;
+      for ( var i = 0, len = dimensions.length; i < len; i++ ) {
+        var tmpvar = {
+          name  : dimensions[i].name,
+          range : [variable.range[i]]
+        };
+        data = Buffer.concat( [ data,  new Buffer(variable.name + "."), asciiForSingleVariable( tmpvar, model ) ] );
+      }
+      return data;
+    }
+
+    function asciiForVariable( variable, model ) {
+      var dimensions = find( model.head.variables, function ( v ) {
+        return v.name == variable.name;
+      } ).dimensions;
+      if ( dimensions.length > 1 ) {
+        return asciiForGriddedVariable( variable, model );
+      }
+      else {
+        return asciiForSingleVariable( variable, model );
       }
     }
 
@@ -229,55 +285,45 @@
       this.options = options;
     };
 
-    Dunnstreet.prototype.full_dds = function () {
-      var dds = "";
-      var variables = this.options.model.head.variables;
-      for ( var j = 0, l2 = variables.length; j < l2; j++ ) {
-        dds = concat( dds, describeVariable( variables[j], this.options.model ) );
-      }
-      return new Buffer( dds );
-    };
-
-    Dunnstreet.prototype.part_dds = function ( variables ) {
-      var dds = "";
-      for ( var i = 0, len = variables.length; i < len; i++ ) {
-
-        var name = variables[i].name;
-        var variable = find( this.options.model.head.variables, function ( a ) {
-          return a.name == name;
-        } );
-
-        var range = variables[i].range;
-        var dimensions = [];
-        for ( var j = 0, l2 = variable.dimensions.length; j < l2; j++ ) {
-          if ( range[j] && range[j].length == 3 ) {
-            var dim = {
-              name: variable.dimensions[j].name,
-              size: Math.max( Math.ceil( ( range[j][2] - ( range[j][0] - 1 ) ) / range[j][1] ), 1 )
-            };
-            dimensions.push( dim );
-          } else {
-            dimensions.push( variable.dimensions[j] );
-          }
-        }
-        var clone = {
-          type: variable.type,
-          name: variable.name,
-          dimensions: dimensions
-        };
-
-        dds = concat( dds, describeVariable( clone, this.options.model ) );
-      }
-      return new Buffer( dds );
-    };
-
     Dunnstreet.prototype.dds = function ( variables ) {
       var dds = "Dataset {";
+
       if ( variables && variables.length > 0 ) {
-        dds = concat( dds, this.part_dds( variables ) );
+        for ( var i = 0, len = variables.length; i < len; i++ ) {
+
+          var name = variables[i].name;
+          var variable = find( this.options.model.head.variables, function ( a ) {
+            return a.name == name;
+          } );
+
+          var range = variables[i].range;
+          var dimensions = [];
+          for ( var j = 0, l2 = variable.dimensions.length; j < l2; j++ ) {
+            if ( range[j] && range[j].length == 3 ) {
+              var dim = {
+                name: variable.dimensions[j].name,
+                size: Math.max( Math.ceil( ( range[j][2] - ( range[j][0] - 1 ) ) / range[j][1] ), 1 )
+              };
+              dimensions.push( dim );
+            } else {
+              dimensions.push( variable.dimensions[j] );
+            }
+          }
+          var clone = {
+            type: variable.type,
+            name: variable.name,
+            dimensions: dimensions
+          };
+
+          dds = concat( dds, "    " + describeVariable( clone, this.options.model ) );
+        }
       } else {
-        dds = concat( dds, this.full_dds() );
+        var variables = this.options.model.head.variables;
+        for ( var j = 0, l2 = variables.length; j < l2; j++ ) {
+          dds = concat( dds, "    " + describeVariable( variables[j], this.options.model ) );
+        }
       }
+
       dds = concat( dds, "} " + ( this.options.filename || '' ) + ";" );
       return new Buffer( dds );
     };
@@ -287,41 +333,30 @@
       var variables = this.options.model.head.variables;
       for ( var i = 0, l1 = variables.length; i < l1; i++ ) {
         var variable = variables[i];
-        das = concat( das, " " + variable.name + " {" );
-        for ( var j = 0, l2 = variable.attributes.length; j < l2; j++ ) {
-          das = concat( das, describeAttribute( variable.attributes[j] ) );
+        das = concat( das, "    " + variable.name + " {" );
+        if (  variable.attributes ) {
+          for ( var j = 0, l2 = variable.attributes.length; j < l2; j++ ) {
+            das = concat( das, "        " + describeAttribute( variable.attributes[j] ) );
+          }
         }
-        das = concat( das, "}" );
+        das = concat( das, "    }" );
       }
       if ( this.options.model.head.attributes && this.options.model.head.attributes.length > 0 ) {
-        das = concat( das, "NC_GLOBAL {" );
+        das = concat( das, "    NC_GLOBAL {" );
         for ( var k = 0, l3 = this.options.model.head.attributes.length; k < l3; k++ ) {
-          das = concat( das, describeAttribute( this.options.model.head.attributes[k] ) );
+          das = concat( das, "        " + describeAttribute( this.options.model.head.attributes[k] ) );
         }
-        das = concat( das, "}" );
+        das = concat( das, "    }" );
       }
       das = concat( das, "}" );
       return new Buffer( das );
     };
 
-/*
-    Dunnstreet.prototype.full_dods = function () {
-      var dap = this.dds();
-      dap = Buffer.concat( [ dap, new Buffer( "\nData:\n" ) ] );
-      var data = find( this.options.model.data.variables, function ( v ) {
-        return v.variable.name == "time";
-      } ).data.data;
-      data = select( data, [1,1,10] );
-      return Buffer.concat( [ dap, buffer( data ) ] );
-    };
-*/
-
-    //Dunnstreet.prototype.part_dods = function ( variables ) {
     Dunnstreet.prototype.dods = function ( variables ) {
       var dap = this.dds( variables );
       dap = Buffer.concat( [ dap, new Buffer( "\nData:\n" ) ] );
       for ( var i = 0, len = variables.length; i < len; i++ ) {
-        dap = Buffer.concat( [ dap, dataForVariable( variables[i], this.options.model )  ] );
+        dap = Buffer.concat( [ dap, dodsForVariable( variables[i], this.options.model )  ] );
       }
       return dap
     };
@@ -330,39 +365,10 @@
       var dap = this.dds( variables );
       dap = Buffer.concat( [ dap, new Buffer( "\n---------------------------------------------\n" ) ] );
       for ( var i = 0, len = variables.length; i < len; i++ ) {
-      //  dap = Buffer.concat( [ dap, dataForVariable( variables[i], this.options.model )  ] );
-        console.log( dataForVariable( variables[i], this.options.model ) );
-      }
-
-      return dap
-    };
-
-/*
-    Dunnstreet.prototype.dods = function ( variables ) {
-      if ( variables ) {
-        return this.part_dods( variables );
-      } else {
-        return this.full_dods();
-      }
-    };
-*/
-
-/*
-    Dunnstreet.prototype.ascii = function ( variables ) {
-      var dap = this.dds( variables );
-      dap = dap + "\n---------------------------------------------\n";
-      for ( var i = 0, len = variables.length; i < len; i++ ) {
-        var variable = variables[i];
-        var data = find( this.options.model.data.variables, function ( v ) {
-          return v.variable.name == variable.name;
-        } ).data;
-        data = select( data, variables.map( function(v) { return v.range; } ) );
-        //dap = dap + data.size;
-        dap = dap + buffer( data );
+        dap = Buffer.concat( [ dap, asciiForVariable( variables[i], this.options.model )  ] );
       }
       return dap;
     };
-*/
 
     return Dunnstreet;
   })();
