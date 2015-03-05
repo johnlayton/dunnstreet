@@ -48,7 +48,7 @@
       return data;
     }
 
-    function ascii( arr ) {
+    function asciiData( arr ) {
       var to_buffer = cwise({
         printCode : false,
         args: ["array", "index"],
@@ -73,7 +73,7 @@
       return to_buffer( arr );
     }
 
-    function buffer( arr ) {
+    function dodsData( arr ) {
       function toBuffer(d) {
         if ( d.size > 0 ) {
           if ( d.dtype == "int32" ) {
@@ -218,7 +218,7 @@
     }
 
     function dodsForSingleVariable( variable, model ) {
-      return buffer( dataFor( variable, model ) );
+      return dodsData( dataFor( variable, model ) );
     }
 
     function dodsForGriddedVariable( variable, model ) {
@@ -251,7 +251,7 @@
     function asciiForSingleVariable( variable, model ) {
       var data = dataFor( variable, model )
       var text = new Buffer( variable.name + "[" + data.shape.slice( 0, data.shape.length ).join( "][" ) + "]" );
-      return Buffer.concat( [ text, new Buffer( ascii( data ) + "\n\n" ) ] );
+      return Buffer.concat( [ text, new Buffer( asciiData( data ) + "\n\n" ) ] );
     }
 
     function asciiForGriddedVariable( variable, model ) {
