@@ -28,16 +28,37 @@
     }
 
     function select( arr, ranges ) {
-      var lo = ranges.map( function( item ) { return Math.max( ( item[0] - 1 ), 0 ) ; } );
-      var hi = ranges.map( function( item ) { return Math.max( ( item[2] - ( item[0] - 1 ) ), 1 ); } );
+
+      var ndarray = require("ndarray");
+
+      if ( !ranges.reduce( function( a,b ) { return a && b[0] != undefined && !( ( b[2] != undefined ) && b[2] < b[0] ); }, true ) ) {
+        return ndarray([]);
+      }
+
+      var pk = ranges.map( function( a ) {
+        return ( a[0] == a[2] || ( a[1] == undefined && a[2] == undefined ) ) ? a[0] : -1;
+      } );
+
+      ranges = ranges.reduce( function( a, b ) {
+        if ( b[0] != b[2] && b[1] != undefined && b[2] != undefined ) {
+          a.push( b );
+        }
+        return a;
+      }, [] );
+
+      var lo = ranges.map( function( item ) { return item[0] } );
+      var hi = ranges.map( function( item ) { return item[2] - ( item[0] - 1 ); } );
       var st = ranges.map( function( item ) { return item[1]; } );
-      var body = "return arr" +
-                 ".lo( " + lo.join( ',' ) + " )" +
-                 ".hi( " + hi.join( ',' ) + " )" +
-                 ".step( " + st.join( ',' ) + " )" +
-                 ";";
-      var func = new Function("arr", body);
-      return func( arr );
+
+      var body = "var result = arr" +
+                 ( pk && pk.length > 0 ? ".pick( "+ pk.join( ',' ) + " )" : "" ) +
+                 ( lo && lo.length > 0 ? ".lo( " + lo.join( ',' ) + " )" : "" ) +
+                 ( hi && hi.length > 0 ? ".hi( " + hi.join( ',' ) + " )" : "" ) +
+                 ( st && st.length > 0 ? ".step( " + st.join( ',' ) + " )" : "" ) +
+                 "; return result.dimension > 0 ? result : ndarray( [ result.get( 0 ) ] );";
+
+      var func = new Function("arr", "ndarray", body);
+      return func( arr, require("ndarray") );
     }
 
     function dataFor( variable, model ) {
@@ -73,58 +94,46 @@
       return to_buffer( arr );
     }
 
-    function dodsData( arr ) {
-      function toBuffer(d) {
-        if ( d.size > 0 ) {
-          if ( d.dtype == "int32" ) {
-            var buffer = new Buffer( 8 + ( d.size * 4 ) );
-            buffer.writeUInt32BE( d.size, 0 );
-            buffer.writeUInt32BE( d.size, 4 );
-            var to_buffer = cwise({
-              printCode : false,
-              args: ["array", "scalar"],
-              body: function to_buffer(val, buffer) {
-                this.position = this.position || 8;
-                buffer.writeInt32BE( val, this.position );
-                this.position = this.position + 4;
-              }
-            });
-            to_buffer(d, buffer);
-            return buffer;
-          } else if ( d.dtype == "float32" ) {
-            var buffer = new Buffer( 8 + ( d.size * 4 ) );
-            buffer.writeUInt32BE( d.size, 0 );
-            buffer.writeUInt32BE( d.size, 4 );
-            var to_buffer = cwise( {
-               printCode : false,
-               args : ["array", "scalar"],
-               pre: function() {
-                 this.count = 0;
-               },
-               post: function() {
-                 return this.count
-               },
-               body : function to_buffer( val, buffer ) {
-                 this.position = this.position || 8;
-                 this.count += 1;
-                 buffer.writeFloatBE( val, this.position );
-                 this.position = this.position + 4;
-               }
-             } );
-            var i = to_buffer( d, buffer );
-            return buffer;
-          }
-          else {
-            //console.log( "###########" );
-            //console.log( "MISSED : " + arr.dtype );
-            //console.log( "###########" );
-          }
-          return buffer;
-        } else {
-          return new Buffer(0);
+    function createBody( dtype ) {
+      if ( dtype == "int32" ) {
+        return function(val, buffer) {
+          buffer.writeInt32BE( val, this.pos += 4 );
+        }
+      } else if ( dtype == "float32" ) {
+        return function(val, buffer) {
+          buffer.writeFloatBE( val, this.pos += 4 );
+          console.log( "[" + ( this.pos / 4 ) + "] => [" + this.pos + "] => " + val );
+        }
+      } else {
+        console.log( "Missed ... " );
+        return function(val, buffer) {
+          buffer.writeInt32BE( val, this.pos += 4 );
         }
       }
-      return toBuffer( arr );
+    }
+
+    function toBuffer( d ) {
+      if ( d.size > 0 ) {
+        var buffer = new Buffer( 8 + ( d.size * 4 ) );
+        buffer.writeUInt32BE( d.size, 0 );
+        buffer.writeUInt32BE( d.size, 4 );
+        var to_buffer = cwise({
+          printCode : true,
+          args: ["array", "scalar"],
+          pre : function() {
+            this.pos = 4;
+          },
+          body: createBody( d.dtype )
+        });
+        to_buffer( d, buffer );
+        return buffer;
+      } else {
+        return new Buffer( 0 );
+      }
+    }
+
+    function dodsData( arr ) {
+     return toBuffer( arr );
     }
 
     function find( arr, callback ) {

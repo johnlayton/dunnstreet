@@ -18,7 +18,8 @@
   "homepage"        : "https://github.com/johnlayton/dunnstreet",
   "dependencies"    : {
     "allimaavenue" : "git://github.com/johnlayton/allimaavenue",
-    "cwise"        : "^1.0.4"
+    "cwise"        : "^1.0.4",
+    "ndarray"      : "^1.0.16"
   },
   "devDependencies" : {
     "kettstreet" : "git://github.com/johnlayton/kettstreet",
