@@ -102,10 +102,10 @@
       } else if ( dtype == "float32" ) {
         return function(val, buffer) {
           buffer.writeFloatBE( val, this.pos += 4 );
-          console.log( "[" + ( this.pos / 4 ) + "] => [" + this.pos + "] => " + val );
+          //console.log( "[" + ( this.pos / 4 ) + "] => [" + this.pos + "] => " + val );
         }
       } else {
-        console.log( "Missed ... " );
+        //console.log( "Missed ... " );
         return function(val, buffer) {
           buffer.writeInt32BE( val, this.pos += 4 );
         }
@@ -118,7 +118,7 @@
         buffer.writeUInt32BE( d.size, 0 );
         buffer.writeUInt32BE( d.size, 4 );
         var to_buffer = cwise({
-          printCode : true,
+          printCode : false,
           args: ["array", "scalar"],
           pre : function() {
             this.pos = 4;
