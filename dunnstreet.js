@@ -102,10 +102,8 @@
       } else if ( dtype == "float32" ) {
         return function(val, buffer) {
           buffer.writeFloatBE( val, this.pos += 4 );
-          //console.log( "[" + ( this.pos / 4 ) + "] => [" + this.pos + "] => " + val );
         }
       } else {
-        //console.log( "Missed ... " );
         return function(val, buffer) {
           buffer.writeInt32BE( val, this.pos += 4 );
         }
