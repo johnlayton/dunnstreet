@@ -97,29 +97,42 @@
     function createBody( dtype ) {
       if ( dtype == "int32" ) {
         return function(val, buffer) {
-          buffer.writeInt32BE( val, this.pos += 4 );
+          buffer.writeInt32BE( val, this.pos );
+          this.pos += 4;
         }
       } else if ( dtype == "float32" ) {
         return function(val, buffer) {
-          buffer.writeFloatBE( val, this.pos += 4 );
+          buffer.writeFloatBE( val, this.pos );
+          this.pos += 4;
+        }
+      } else if ( dtype == "float64" ) {
+        return function(val, buffer) {
+          buffer.writeDoubleBE( val, this.pos );
+          this.pos += 8;
+        }
+      } else if ( dtype == "double" ) {
+        return function(val, buffer) {
+          buffer.writeDoubleBE( val, this.pos );
+          this.pos += 8;
         }
       } else {
         return function(val, buffer) {
-          buffer.writeInt32BE( val, this.pos += 4 );
+          buffer.writeInt32BE( val, this.pos );
+          this.pos += 4;
         }
       }
     }
 
     function toBuffer( d ) {
       if ( d.size > 0 ) {
-        var buffer = new Buffer( 8 + ( d.size * 4 ) );
+        var buffer = new Buffer( 8 + ( d.size * ( d.dtype == "float64" ? 8 : 4 ) ) );
         buffer.writeUInt32BE( d.size, 0 );
         buffer.writeUInt32BE( d.size, 4 );
         var to_buffer = cwise({
           printCode : false,
           args: ["array", "scalar"],
           pre : function() {
-            this.pos = 4;
+            this.pos = 8;
           },
           body: createBody( d.dtype )
         });
@@ -149,6 +162,8 @@
           return "Int32";
         case NC_FLOAT:
           return "Float32";
+        case NC_DOUBLE:
+          return "Float64";
         case NC_STRING:
         case NC_CHAR:
           return "String";
